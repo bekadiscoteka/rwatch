@@ -14,7 +14,7 @@ BPFTOOL ?= bpftool
 SRC := src
 ARCH := $(shell uname -m | sed 's/x86_64/x86/; s/aarch64/arm64/')
 
-BPF_CFLAGS := -O2 -g -Wall -Wno-missing-declarations -target bpf -D__TARGET_ARCH_$(ARCH) -I$(SRC)
+BPF_CFLAGS := -O2 -g -Wall -Wno-missing-declarations -fms-extensions -Wno-microsoft-anon-tag -target bpf -D__TARGET_ARCH_$(ARCH) -I$(SRC)
 CFLAGS     := -O2 -g -Wall -Wextra -I$(SRC)
 LDLIBS     := -lbpf -lelf -lz
 

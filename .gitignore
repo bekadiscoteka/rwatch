@@ -1,0 +1,4 @@
+src/vmlinux.h
+*.o
+*.skel.h
+/rwatch

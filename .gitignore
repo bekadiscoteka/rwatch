@@ -2,3 +2,5 @@ src/vmlinux.h
 *.o
 *.skel.h
 /rwatch
+CLAUDE.md
+.*.swp

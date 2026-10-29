@@ -13,8 +13,8 @@ volatile sig_atomic_t stop = 0;
 void  handle_sigint(int sig) {
 	(void)sig;
 	const char msg[] = "\n[SIGNAL] Получен сигнал прерывания. Завершаем работу...\n";
-	if (write(STDERR_FILENO, msg, sizeof(msg) - 1) == -1)
-		exit(1);
+	write(STDERR_FILENO, msg, sizeof(msg) - 1);
+		;
 	stop = 1;
 }
 
@@ -53,8 +53,11 @@ int main(void)
 	}
 		
 
-	while (!stop) 
-		ring_buffer__poll(rb, 100 /* мс */);
+	while (!stop) {
+		int err = ring_buffer__poll(rb, 100);
+		if (err != -EINTR && err < 0) 
+			break;
+	}
 
 
 	ring_buffer__free(rb); 
@@ -78,6 +81,10 @@ static int handle_event(void *cctx,  void  *data, size_t size) {
 		case RW_RENAME:
 			printf("\tProcess ID: %d\tName: %s\ttype: %s\told path: %s\tpath: %s\tflags: %llx\n", 
 				e->pid, e->comm, "rename", e->oldpath, e->path, e->flags);
+			break;
+		case RW_UNLINK: 
+			printf("\tProcess ID: %d\ttype: %s\tName: %s\tPath: %s\n", 
+				e->pid, "unlink",  e->comm, e->path);
 			break;
 		default:
 			printf("Unsupported type\n");

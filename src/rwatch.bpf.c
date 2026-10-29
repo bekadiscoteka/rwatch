@@ -68,7 +68,20 @@ int BPF_PROG(handle_rename, int olddfd, struct filename *from,
 	return 0;
 }
 
+SEC("fentry/filename_unlinkat")
+int BPF_PROG(handle_unlink, int dfd, struct filename *fname) {
+	struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0); 
+	if (e == NULL)
+		return 0;
+	e->pid = bpf_get_current_pid_tgid() >> 32;
+	bpf_get_current_comm(e->comm, COMM_LEN);
+	e->flags = 0;
+	e->type = RW_UNLINK;
 
+	bpf_probe_read_kernel_str(e->path, PATH_LEN, fname->name);
 
+	bpf_ringbuf_submit(e, 0);
+	return 0;
+}
 
 

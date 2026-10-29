@@ -3,7 +3,7 @@
 #define PATH_LEN 256
 #define COMM_LEN 16
 
-enum types { RW_OPEN=1, RW_RENAME };
+enum types { RW_OPEN=1, RW_RENAME, RW_UNLINK};
 
 struct event {
     pid_t pid;

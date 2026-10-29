@@ -13,14 +13,16 @@ volatile sig_atomic_t stop = 0;
 void  handle_sigint(int sig) {
 	(void)sig;
 	const char msg[] = "\n[SIGNAL] Получен сигнал прерывания. Завершаем работу...\n";
-	write(STDERR_FILENO, msg, sizeof(msg) - 1);
-		;
+	if (write(STDERR_FILENO, msg, sizeof(msg) - 1) == -1) {
+		;;
+	}
+
 	stop = 1;
 }
 
 int main(void)
 {
-	printf("SCANNING FOR: openat2 rename\n");
+	printf("SCANNING FOR: openat2 rename unlink\n");
 
 
 	struct sigaction sa;
@@ -36,9 +38,14 @@ int main(void)
 		return 1;
 	}
 
-	struct rwatch_bpf *skel = rwatch_bpf__open_and_load();
+	struct rwatch_bpf *skel = rwatch_bpf__open();
 	if (skel == NULL) 
 		return 1;
+	skel->rodata->selfpid = getpid();
+	if (rwatch_bpf__load(skel) != 0) {
+		rwatch_bpf__destroy(skel);
+		return 1;
+	}
 
 	if (rwatch_bpf__attach(skel) != 0) {
 		rwatch_bpf__destroy(skel);
@@ -51,8 +58,7 @@ int main(void)
 		rwatch_bpf__destroy(skel);
 		return 1;
 	}
-		
-
+	
 	while (!stop) {
 		int err = ring_buffer__poll(rb, 100);
 		if (err != -EINTR && err < 0) 

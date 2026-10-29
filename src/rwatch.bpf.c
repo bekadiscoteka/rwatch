@@ -8,7 +8,10 @@
 #define O_TRUNC    	00001000
 #define O_APPEND   	00002000
 
+
 char LICENSE[] SEC("license") = "GPL";
+
+const volatile pid_t selfpid = 0;
 
 struct {                                   
     __uint(type, BPF_MAP_TYPE_RINGBUF);   
@@ -26,10 +29,24 @@ static __always_inline bool isdanger(__u64 f) {
 	return false;
 }
 
+static __always_inline bool isself(pid_t pid) {
+#ifdef SELF_OFF
+	return false;
+#else
+	if (pid == selfpid) 
+		return true;
+	return false;
+#endif
+}
+
 
 SEC("fentry/do_sys_openat2")
 int BPF_PROG(handle_openat, int dfd, const char *filename, struct open_how *how)
 {
+	pid_t pid = bpf_get_current_pid_tgid() >> 32;
+	if (isself(pid) == true)
+		return 0;
+
 	if (isdanger(how->flags) == false)
 		return 0;
 
@@ -37,7 +54,7 @@ int BPF_PROG(handle_openat, int dfd, const char *filename, struct open_how *how)
 	if (e == NULL) 
 		return 0;
 	
-	e->pid = bpf_get_current_pid_tgid() >> 32; 
+	e->pid = pid;
 	bpf_get_current_comm(e->comm, COMM_LEN);
 	bpf_probe_read_user_str(e->path, PATH_LEN, filename);
 	e->flags = how->flags;
@@ -51,12 +68,15 @@ SEC("fentry/filename_renameat2")
 int BPF_PROG(handle_rename, int olddfd, struct filename *from,
              int newdfd, struct filename *to, unsigned int flags)
 {
+	pid_t pid = bpf_get_current_pid_tgid() >> 32;
+	if (isself(pid) == true)
+		return 0;
 
 	struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
 	if (e == NULL) 
 		return 0;
 
-	e->pid = bpf_get_current_pid_tgid() >> 32; 
+	e->pid = pid;
 	bpf_get_current_comm(e->comm, COMM_LEN);
 	e->flags = flags;
 	e->type = RW_RENAME;
@@ -70,10 +90,14 @@ int BPF_PROG(handle_rename, int olddfd, struct filename *from,
 
 SEC("fentry/filename_unlinkat")
 int BPF_PROG(handle_unlink, int dfd, struct filename *fname) {
+	pid_t pid = bpf_get_current_pid_tgid() >> 32;
+	if (isself(pid))
+		return 0;
+
 	struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0); 
 	if (e == NULL)
 		return 0;
-	e->pid = bpf_get_current_pid_tgid() >> 32;
+	e->pid = pid;
 	bpf_get_current_comm(e->comm, COMM_LEN);
 	e->flags = 0;
 	e->type = RW_UNLINK;

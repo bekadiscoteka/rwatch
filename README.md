@@ -9,10 +9,10 @@ Written in C with libbpf and CO-RE. The kernel part is loaded through a
 
 ## Status
 
-- [x] `openat` / `open` / `creat`: only opens for writing (`O_WRONLY`, `O_RDWR`, `O_TRUNC`), filtered in the kernel
+- [x] `openat` / `open` / `creat`: only opens for writing (`O_WRONLY`, `O_RDWR`, `O_TRUNC`, `O_APPEND`), filtered in the kernel
 - [x] `rename` / `renameat` / `renameat2`: old and new path
-- [ ] `unlinkat`
-- [ ] ignore rwatch's own pid
+- [x] `unlink` / `unlinkat`: path of the removed file
+- [x] ignore rwatch's own pid (filtered in the kernel)
 - [ ] detector: per-pid sliding window, alert on threshold, optional `--kill`
 - [ ] demo with a fake ransomware script
 
@@ -23,12 +23,26 @@ Written in C with libbpf and CO-RE. The kernel part is loaded through a
  ──────                                        ───────────────────
  fentry/do_sys_openat2      ─┐
    filter: write opens only  ├─► BPF ring buffer ──mmap──► ring_buffer__poll()
- fentry/filename_renameat2  ─┘   (struct event)              └─ handle_event(): switch on e->type
+ fentry/filename_renameat2  ─┤   (struct event)              └─ handle_event(): switch on e->type
+ fentry/filename_unlinkat   ─┘
+   each hook: skip rwatch's own pid
 ```
 
 `src/rwatch.h` holds `struct event`, shared by both sides. Each event carries
 `type`, `pid`, `comm`, `path` (the file's name after the event), `oldpath`
 (rename only) and `flags`.
+
+### Ignoring its own pid
+
+rwatch should not trigger on its own file activity. The BPF side has a
+`const volatile pid_t selfpid` in `.rodata`. The loader opens the skeleton,
+writes `getpid()` into `skel->rodata->selfpid` and only then loads it, so the
+verifier sees the value as a constant. Every hook compares the current tgid
+(`bpf_get_current_pid_tgid() >> 32`) with it before reserving ring buffer space.
+
+Checked by building the BPF part with and without `-DSELF_OFF` (which disables
+the check) and opening a file for writing from rwatch itself: the event shows
+up only in the `SELF_OFF` build.
 
 ### Why fentry and not syscall tracepoints
 
@@ -45,9 +59,11 @@ syscall end up:
 |---|---|---|
 | `open`, `openat`, `openat2`, `creat` | `fentry/do_sys_openat2` | user memory → `bpf_probe_read_user_str` |
 | `rename`, `renameat`, `renameat2` | `fentry/filename_renameat2` | already copied into `struct filename` → `bpf_probe_read_kernel_str` |
+| `unlink`, `unlinkat` | `fentry/filename_unlinkat` | same, `struct filename` |
 
 The cost: these are internal kernel functions, not a stable ABI.
-`filename_renameat2` was called `do_renameat2` in older kernels.
+`filename_renameat2` and `filename_unlinkat` were called `do_renameat2` and
+`do_unlinkat` in older kernels.
 
 ## Build
 
@@ -76,6 +92,7 @@ In another terminal:
 echo hi > /tmp/a.txt                 # open for write: shown
 cat /tmp/a.txt                       # read-only open: filtered out
 mv /tmp/a.txt /tmp/a.txt.locked      # rename: shown
+rm /tmp/a.txt.locked                 # unlink: shown
 ```
 
 <!-- TODO: paste real output here -->
@@ -85,6 +102,7 @@ mv /tmp/a.txt /tmp/a.txt.locked      # rename: shown
 - Paths are reported exactly as the process passed them: relative paths
   (`cd /tmp && mv a b`) come without the directory.
 - Paths longer than 255 bytes are truncated.
+- `rmdir` (and `unlinkat` with `AT_REMOVEDIR`) goes through `filename_rmdir` and is not traced.
 - Opening for write is not the same as writing: `write()` itself is not traced yet.
 - If user space falls behind and the ring buffer fills up, new events are dropped.
 - Hooks depend on internal kernel function names and may need changes on other kernels.
